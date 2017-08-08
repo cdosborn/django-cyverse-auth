@@ -157,78 +157,37 @@ def get_or_create_user_and_token(user_profile, token_key, token_expire=None, rem
     Create token for user
     return token
     """
-    try:
-        get_or_create_user(user_profile['username'], user_profile)
-    except IntegrityError:
-        get_or_create_user(user_profile['username'], user_profile)
-    try:
-        auth_token = get_or_create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
-    except IntegrityError:
-        auth_token = get_or_create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+    auth_user_token = create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+    return auth_user_token
 
-    return auth_token
-
-
-def get_or_create_token(username, token_key=None, token_expire=None, remote_ip=None, issuer=None):
-    """
-    Generate a Token based on current username
-    (And token_key, expiration, issuer.. If available)
-    """
+def get_or_create_user(username=None, attributes={}):
+    # NOTE: Mapping of usernames to Django user happens here.
+    # In this example, usernames are 'case insensitive' so we
+    # Force any username lookup to be in lowercase
+    username = attributes['username'].lower()
     defaults = {
-        key=token_key, user=user, issuer=issuer,
-        remote_ip=remote_ip,
-        api_server_url=auth_settings.API_SERVER_URL
+        'email': '%s@atmosphere.local' % username,
+        'last_login': timezone.now()
     }
-    try:
-        User = get_user_model()
-        user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        logger.warn("User %s doesn't exist on the DB. "
-                    "Auth Token _NOT_ created" % username)
-        return None
-    auth_user_token, created = Token.objects.get_or_create(
-        key=token_key, user=user, defaults=defaults)
-    logger.debug(
-        "%s token - %s" ,
-        "Created" if created else "Retrieved",
-        token_key)
+    for field in ['firstName', 'lastName']:
+        if attributes.get(field):
+            defaults[field] = attributes[field]
+    user = User.objects.update_or_create(defaults=defaults, username=username)
+
+def create_token(username, token_key=None, token_expire=None, remote_ip=None, issuer=None):
+    user = get_or_create_user(username=username)
+    token_defaults = {
+        'issuer': issuer,
+        'remote_ip': remote_ip,
+        'api_server_url': auth_settings.API_SERVER_URL
+    }
+    auth_user_token = Token.objects.update_or_create(
+            defaults=token_defaults,
+            key=token_key,
+            user=user)
     if token_expire:
         auth_user_token.update_expiration(token_expire)
         auth_user_token.save()
-    return auth_user_token
-
-
-def get_or_create_user(username=None, attributes={}):
-    User = get_user_model()
-    email = attributes.get('email', '%s@atmosphere.local' % username)
-    first_name = attributes.get('firstName')
-    last_name = attributes.get('lastName')
-    defaults = {
-        'email':email,
-        'first_name':first_name,
-        'last_name':last_name,
-    }
-    user, created =  User.get_or_create(
-        username=username,
-        defaults=defaults)
-    logger.debug(
-        "%s User - %s" ,
-        "Created" if created else "Retrieved",
-        token_key)
-    # Update if necessary
-    changed = False
-    if first_name and user.first_name != first_name:
-        changed = True
-        user.first_name = first_name
-    if last_name and user.last_name != last_name:
-        changed = True
-        user.last_name = last_name
-    if email and user.email != email:
-        changed = True
-        user.email = email
-    if changed:
-        user.save()
-
 
 def lookupSessionToken(request):
     """
