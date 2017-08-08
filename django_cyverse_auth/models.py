@@ -157,11 +157,19 @@ def create_user_and_token(user_profile, token_key, token_expire=None, remote_ip=
     Create token for user
     return token
     """
-    get_or_create_user(user_profile['username'], user_profile)
-    auth_token = create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+    try:
+        get_or_create_user(user_profile['username'], user_profile)
+    except IntegrityError:
+        get_or_create_user(user_profile['username'], user_profile)
+    try:
+        auth_token = create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+    except IntegrityError:
+        auth_token = create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+
     return auth_token
 
 
+@transaction.atomic
 def create_token(username, token_key=None, token_expire=None, remote_ip=None, issuer=None):
     """
     Generate a Token based on current username
@@ -174,18 +182,23 @@ def create_token(username, token_key=None, token_expire=None, remote_ip=None, is
         logger.warn("User %s doesn't exist on the DB. "
                     "Auth Token _NOT_ created" % username)
         return None
-    auth_user_token = _atomic_get_token(
-            user,
-            token_key=token_key,
-            token_expire=token_expire,
+    try:
+        auth_user_token = Token.objects.get(
+            key=token_key, user=user)
+        logger.debug("Retrieved existing token - %s" % token_key)
+    except Token.DoesNotExist:
+        auth_user_token = Token.objects.create(
+            key=token_key, user=user, issuer=issuer,
             remote_ip=remote_ip,
-            issuer=issuer)
+            api_server_url=auth_settings.API_SERVER_URL)
+        logger.debug("Created new token - %s" % token_key)
     if token_expire:
         auth_user_token.update_expiration(token_expire)
         auth_user_token.save()
     return auth_user_token
 
 
+@transaction.atomic
 def get_or_create_user(username=None, attributes={}):
     """
     Retrieve or create a User matching the username (No password)
@@ -198,7 +211,18 @@ def get_or_create_user(username=None, attributes={}):
     # Force any username lookup to be in lowercase
     username = username.lower()
 
-    user = _atomic_get_user(username, attributes=attributes)
+    User = get_user_model()
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        now = timezone.now()
+        email = attributes.get('email', '%s@atmosphere.local' % username)
+        user = User(
+            username=username,
+            email=email,
+            last_login=now)
+        user.save()
+        logger.info("Created new user - %s" % username)
     # Update if necessary
     changed = False
     if attributes.get('firstName') \
@@ -259,47 +283,5 @@ def userCanEmulate(username):
         return False
 
 
-@transaction.atomic
-def _atomic_get_token(user, token_key=None, token_expire=None, remote_ip=None, issuer=None):
-    try:
-        auth_user_token = Token.objects.get(
-            key=token_key, user=user)
-        logger.debug("Retrieved existing token - %s" % token_key)
-        return auth_user_token
-    except Token.DoesNotExist:
-        pass
-    try:
-        auth_user_token = Token.objects.create(
-            key=token_key, user=user, issuer=issuer,
-            remote_ip=remote_ip,
-            api_server_url=auth_settings.API_SERVER_URL)
-        logger.debug("Created new token - %s" % token_key)
-    except IntegrityError:
-        auth_user_token = Token.objects.get(
-            key=token_key, user=user)
-        logger.debug("Race-Condition avoided: Retrieved existing token - %s" % token_key)
-    return auth_user_token
 
 
-@transaction.atomic
-def _atomic_get_user(username, attributes={}):
-    User = get_user_model()
-    try:
-        user = User.objects.get(username=username)
-        logger.debug("Retrieved existing user - %s" % username)
-        return user
-    except User.DoesNotExist:
-        pass
-    try:
-        now = timezone.now()
-        email = attributes.get('email', '%s@atmosphere.local' % username)
-        user = User.objects.create(
-            username=username,
-            email=email,
-            last_login=now)
-        logger.debug("Created new user - %s" % username)
-        return user
-    except IntegrityError:
-        user = User.objects.get(username=username)
-        logger.debug("Retrieved existing user - %s" % username)
-        return user
