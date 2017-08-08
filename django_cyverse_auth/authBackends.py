@@ -17,7 +17,7 @@ from keystoneclient.v3 import client
 
 
 from .settings import auth_settings
-from .models import get_or_create_user, create_user_and_token
+from .models import get_or_create_user, get_or_create_user_and_token
 from .models import Token
 from .protocol.ldap import ldap_validate, ldap_formatAttrs
 from .protocol.ldap import lookupUser as ldap_lookupUser
@@ -113,7 +113,7 @@ class LDAPLoginBackend(ModelBackend):
         return self._update_token(attributes, token, request)
 
     def _update_token(self, user_profile, token, request=None):
-        auth_token = create_user_and_token(user_profile, token, issuer="LDAPLoginBackend")
+        auth_token = get_or_create_user_and_token(user_profile, token, issuer="LDAPLoginBackend")
         user = auth_token.user
         if request:
             request.session['token_key'] = auth_token.key
@@ -462,7 +462,7 @@ class OpenstackLoginBackend(ModelBackend):
 
     def _update_token(self, auth_url, username, token, expiry_time, request=None):
         user_profile = self._user_profile_for_auth(auth_url, username)
-        auth_token = create_user_and_token(user_profile, token, token_expire=expiry_time, issuer="OpenstackLoginBackend")
+        auth_token = get_or_create_user_and_token(user_profile, token, token_expire=expiry_time, issuer="OpenstackLoginBackend")
         user = auth_token.user
         if request:
             request.session['token_key'] = auth_token.key

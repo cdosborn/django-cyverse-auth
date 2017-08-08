@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 from .settings import auth_settings
 from .exceptions import Unauthorized
 from .models import Token as AuthToken,\
-     create_user_and_token
+     get_or_create_user_and_token
 from .models import get_or_create_user
 from .protocol.cas import cas_validateUser
 from .protocol.cas import cas_profile_for_token
@@ -239,7 +239,7 @@ class OpenstackTokenAuthentication(TokenAuthentication):
                 'email': "%s@%s" % (username, hostname),
             }
             logger.debug("Profile attrs %s converted to %s" % (profile_attrs, new_profile))
-            return create_user_and_token(new_profile, token_key)
+            return get_or_create_user_and_token(new_profile, token_key)
         except:
             return None
 
@@ -309,7 +309,7 @@ def validate_oauth_token(token, request=None):
         'lastName': profile_attrs['lastName'],
         'email': profile_attrs['email']
     }
-    return create_user_and_token(new_profile, token)
+    return get_or_create_user_and_token(new_profile, token)
 
 
 

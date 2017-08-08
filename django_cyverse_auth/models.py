@@ -94,7 +94,7 @@ class Token(models.Model):
         Updates expiration by pre-determined amount.. Does not call save.
         """
         if not token_expiration:
-            self.expireTime = timezone.now() + timedelta(hours=2)
+            self.expireTime = timezone.now() + timedelta(hours=auth_settings.TOKEN_EXPIRY_TIME)
         else:
             self.expireTime = token_expiration
 
@@ -150,7 +150,7 @@ def create_access_token(token_key, token_expire, issuer):
     return access_token
 
 
-def create_user_and_token(user_profile, token_key, token_expire=None, remote_ip=None, issuer=None):
+def get_or_create_user_and_token(user_profile, token_key, token_expire=None, remote_ip=None, issuer=None):
     """
     Given a user_profile (minimally) containing the keys: ['username', 'firstName', 'lastName', 'email'] and (optionally) a token UUID
     Create the user
@@ -162,84 +162,72 @@ def create_user_and_token(user_profile, token_key, token_expire=None, remote_ip=
     except IntegrityError:
         get_or_create_user(user_profile['username'], user_profile)
     try:
-        auth_token = create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+        auth_token = get_or_create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
     except IntegrityError:
-        auth_token = create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
+        auth_token = get_or_create_token(user_profile['username'], token_key, token_expire, remote_ip, issuer)
 
     return auth_token
 
 
-@transaction.atomic
-def create_token(username, token_key=None, token_expire=None, remote_ip=None, issuer=None):
+def get_or_create_token(username, token_key=None, token_expire=None, remote_ip=None, issuer=None):
     """
     Generate a Token based on current username
     (And token_key, expiration, issuer.. If available)
     """
-    User = get_user_model()
+    defaults = {
+        key=token_key, user=user, issuer=issuer,
+        remote_ip=remote_ip,
+        api_server_url=auth_settings.API_SERVER_URL
+    }
     try:
+        User = get_user_model()
         user = User.objects.get(username=username)
     except User.DoesNotExist:
         logger.warn("User %s doesn't exist on the DB. "
                     "Auth Token _NOT_ created" % username)
         return None
-    try:
-        auth_user_token = Token.objects.get(
-            key=token_key, user=user)
-        logger.debug("Retrieved existing token - %s" % token_key)
-    except Token.DoesNotExist:
-        auth_user_token = Token.objects.create(
-            key=token_key, user=user, issuer=issuer,
-            remote_ip=remote_ip,
-            api_server_url=auth_settings.API_SERVER_URL)
-        logger.debug("Created new token - %s" % token_key)
+    auth_user_token, created = Token.objects.get_or_create(
+        key=token_key, user=user, defaults=defaults)
+    logger.debug(
+        "%s token - %s" ,
+        "Created" if created else "Retrieved",
+        token_key)
     if token_expire:
         auth_user_token.update_expiration(token_expire)
         auth_user_token.save()
     return auth_user_token
 
 
-@transaction.atomic
 def get_or_create_user(username=None, attributes={}):
-    """
-    Retrieve or create a User matching the username (No password)
-    """
-    if not username:
-        return None
-
-    # NOTE: Mapping of usernames to Django user happens here.
-    # In this example, usernames are 'case insensitive' so we
-    # Force any username lookup to be in lowercase
-    username = username.lower()
-
     User = get_user_model()
-    try:
-        user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        now = timezone.now()
-        email = attributes.get('email', '%s@atmosphere.local' % username)
-        user = User(
-            username=username,
-            email=email,
-            last_login=now)
-        user.save()
-        logger.info("Created new user - %s" % username)
+    email = attributes.get('email', '%s@atmosphere.local' % username)
+    first_name = attributes.get('firstName')
+    last_name = attributes.get('lastName')
+    defaults = {
+        'email':email,
+        'first_name':first_name,
+        'last_name':last_name,
+    }
+    user, created =  User.get_or_create(
+        username=username,
+        defaults=defaults)
+    logger.debug(
+        "%s User - %s" ,
+        "Created" if created else "Retrieved",
+        token_key)
     # Update if necessary
     changed = False
-    if attributes.get('firstName') \
-            and user.first_name != attributes['firstName']:
+    if first_name and user.first_name != first_name:
         changed = True
-        user.first_name = attributes['firstName']
-    if attributes.get('lastName') \
-            and user.last_name != attributes['lastName']:
+        user.first_name = first_name
+    if last_name and user.last_name != last_name:
         changed = True
-        user.last_name = attributes['lastName']
-    if attributes.get('email') \
-            and user.email != attributes['email']:
+        user.last_name = last_name
+    if email and user.email != email:
         changed = True
-        user.email = attributes['email']
+        user.email = email
     if changed:
         user.save()
-    return user
 
 
 def lookupSessionToken(request):
