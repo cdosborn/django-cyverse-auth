@@ -313,13 +313,15 @@ def validate_oauth_token(token, request=None):
                     % user_profile)
         return False
 
-    # CAS specific:
-    # converts [{u'lastName': u'Doe'}, {u'firstName': u'John'}]
-    # to {u'lastName': u'doe', u'firstName': u'John'}
-    profile_attrs = {
-        c.keys()[0]: c.values()[0]
-        for c in user_profile.get('attributes', [])
-    }
+    profile_attrs = user_profile.get('attributes')
+    if isinstance(profile_attrs, list):
+	# CAS <= 4 specific:
+	# converts [{u'lastName': u'Doe'}, {u'firstName': u'John'}]
+	# to {u'lastName': u'doe', u'firstName': u'John'}
+	profile_attrs = {
+	    c.keys()[0]: c.values()[0]
+	    for c in profile_attrs
+	}
     username = username.lower()
     new_profile = {
         'username': username,

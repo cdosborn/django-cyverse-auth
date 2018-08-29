@@ -163,11 +163,15 @@ cas_oauth_client = CAS_OAuthClient(auth_settings.CAS_SERVER,
 def create_user_token_from_cas_profile(profile, access_token):
     profile_dict = dict()
     username = profile['id']
-    for attr in profile['attributes']:
-        key = attr.keys()[0]
-        value = attr[key]
-        profile_dict[key] = value
-
+    attributes = profile['attributes']
+    if isinstance(attributes, list): # CAS <= 4
+	for attr in attributes:
+	    if isinstanceof(attr, dict):
+		for k, v in attr.items():
+		    profile_dict[k] = v
+    elif isinstance(attributes, dict): # CAS 5
+	for k, v in attributes.items():
+	    profile_dict[k] = v
     user = get_or_create_user(username, profile_dict)
     user_token = Token.objects.create(key=access_token, user=user)
     return user_token
